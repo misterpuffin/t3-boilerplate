@@ -3,19 +3,19 @@ import { type Session } from "next-auth";
 import { SessionProvider } from "next-auth/react";
 
 import { api } from "~/utils/api";
-import { ChakraProvider, extendTheme, type ThemeConfig } from "@chakra-ui/react";
+// import { ChakraProvider, extendTheme, type ThemeConfig } from "@chakra-ui/react";
 
 import "~/styles/globals.css";
 
 
 // 2. Add your color mode config
-const config: ThemeConfig = {
-  initialColorMode: 'dark',
-  useSystemColorMode: false,
-}
+// const config: ThemeConfig = {
+//   initialColorMode: 'dark',
+//   useSystemColorMode: false,
+// }
 
 // 3. extend the theme
-const theme = extendTheme({ config })
+// const theme = extendTheme({ config })
 
 const MyApp: AppType<{ session: Session | null }> = ({
   Component,

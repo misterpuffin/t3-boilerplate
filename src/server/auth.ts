@@ -4,7 +4,6 @@ import {
   getServerSession,
   type NextAuthOptions,
   type DefaultSession,
-  type Profile
 } from "next-auth";
 import { type TokenSet } from "openid-client"
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
