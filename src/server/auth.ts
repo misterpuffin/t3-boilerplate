@@ -1,3 +1,4 @@
+import { compactDecrypt, importJWK, importPKCS8 } from 'jose'
 import { type GetServerSidePropsContext } from "next";
 import {
   getServerSession,
@@ -35,37 +36,80 @@ declare module "next-auth" {
  * @see https://next-auth.js.org/configuration/options
  */
 export const authOptions: NextAuthOptions = {
-  debug: true,
   callbacks: {
-    session: ({ session, user }) => ({
-      ...session,
-      user: {
-        ...session.user,
-        id: user.id, },
-    }),
+    session: ({ session, user }) => {
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: user.id,
+        }
+      }
+    }
   },
   adapter: PrismaAdapter(prisma),
   providers: [
     // SGID Provider
     {
-      id: 'SGID',
-      name: 'SGID',
+      id: 'sgid',
+      name: 'sgID',
       type: 'oauth',
       wellKnown: 'https://api.id.gov.sg/v2/.well-known/openid-configuration',
+      jwks_endpoint: 'https://api.id.gov.sg/v2/.well-known/jwks.json',
       checks: 'pkce',
-      authorization: { 
-        url: "https://api.id.gov.sg/v2/oauth/authorize",
+      authorization: {
         params: {
-          scope: "openid myinfo.name",
-          grant_type: 'authorization_code'
+          scope: "myinfo.name openid",
         }
       },
       client: { token_endpoint_auth_method: "client_secret_post" },
       clientId: env.SGID_CLIENT_ID,
       clientSecret: env.SGID_CLIENT_SECRET,
+      userinfo: {
+        url: 'https://api.id.gov.sg/v2/oauth/userinfo',
+        // Make the call here and do whatever you like to profile
+        async request({ client, tokens }) {
+          const profile = await client.userinfo(tokens)
+          let privateKeyJwk
+          let payloadJwk
+          try {
+            // Import client private key in PKCS8 format
+            privateKeyJwk = await importPKCS8(env.SGID_PRIVATE_KEY, 'RSA-OAEP-256')
+          } catch (e) {
+            throw new Error('Failed to import private key. Check that privateKey is a valid PKCS1 or PKCS8 key.')
+          }
+          // Decrypt key to get plaintext symmetric key
+          const decoder = new TextDecoder()
+          try {
+            const decryptedKey = decoder.decode(
+              (await compactDecrypt(profile.key, privateKeyJwk)).plaintext,
+            )
+            payloadJwk = await importJWK(JSON.parse(decryptedKey))
+          } catch (e) {
+            throw new Error(Errors.DECRYPT_BLOCK_KEY_ERROR)
+          }
+
+          // Decrypt each jwe in body
+          const result: Record<string, string> = {}
+          try {
+            for (const field in profile.data) {
+              const jwe = profile.data[field]
+              const decryptedValue = decoder.decode(
+                (await compactDecrypt(jwe, payloadJwk)).plaintext,
+              )
+              result[field] = decryptedValue
+            }
+          } catch (e) {
+            throw new Error('Unable to decrypt payload')
+          }
+          return { sub: profile.sub, data: result }
+        }
+      },
       profile(profile) {
+        console.log(profile)
         return {
           id: profile.sub,
+          name: profile.data['myinfo.name'],
         }
       },
     }
