@@ -1,10 +1,12 @@
-import { compactDecrypt, importJWK, importPKCS8 } from 'jose'
+import { compactDecrypt, importJWK, importPKCS8, type JWK } from 'jose'
 import { type GetServerSidePropsContext } from "next";
 import {
   getServerSession,
   type NextAuthOptions,
   type DefaultSession,
+  type Profile
 } from "next-auth";
+import { type TokenSet } from "openid-client"
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { env } from "~/env.mjs";
 import { prisma } from "~/server/db";
@@ -30,6 +32,11 @@ declare module "next-auth" {
   // }
 }
 
+interface SGIDUserInfo {
+  key: string
+  sub: string
+  data: Record<string, string>
+}
 /**
  * Options for NextAuth.js used to configure adapters, providers, callbacks, etc.
  *
@@ -69,7 +76,7 @@ export const authOptions: NextAuthOptions = {
         url: 'https://api.id.gov.sg/v2/oauth/userinfo',
         // Make the call here and do whatever you like to profile
         async request({ client, tokens }) {
-          const profile = await client.userinfo(tokens)
+          const profile = await client.userinfo<SGIDUserInfo>(tokens as TokenSet)
           let privateKeyJwk
           let payloadJwk
           try {
@@ -84,16 +91,16 @@ export const authOptions: NextAuthOptions = {
             const decryptedKey = decoder.decode(
               (await compactDecrypt(profile.key, privateKeyJwk)).plaintext,
             )
-            payloadJwk = await importJWK(JSON.parse(decryptedKey))
+            payloadJwk = await importJWK(JSON.parse(decryptedKey) as JWK)
           } catch (e) {
-            throw new Error(Errors.DECRYPT_BLOCK_KEY_ERROR)
+            throw new Error('Unable to decrypt or import payload key. Check that you used the correct private key.')
           }
 
           // Decrypt each jwe in body
           const result: Record<string, string> = {}
           try {
             for (const field in profile.data) {
-              const jwe = profile.data[field]
+              const jwe = profile.data[field] as string
               const decryptedValue = decoder.decode(
                 (await compactDecrypt(jwe, payloadJwk)).plaintext,
               )
@@ -105,8 +112,7 @@ export const authOptions: NextAuthOptions = {
           return { sub: profile.sub, data: result }
         }
       },
-      profile(profile) {
-        console.log(profile)
+      profile(profile: SGIDUserInfo) {
         return {
           id: profile.sub,
           name: profile.data['myinfo.name'],
